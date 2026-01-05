@@ -1,0 +1,665 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PostgreSQL: Architecture, Cloud Native & Evolution</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        /* Custom scrollbar for better aesthetics */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f5f5f4;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #d6d3d1;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #a8a29e;
+        }
+
+        .chart-container {
+            position: relative;
+            width: 100%;
+            max-width: 600px;
+            margin-left: auto;
+            margin-right: auto;
+            height: 300px;
+            max-height: 400px;
+        }
+        @media (min-width: 768px) {
+            .chart-container {
+                height: 350px;
+            }
+        }
+
+        .arch-box {
+            transition: all 0.3s ease;
+        }
+        .arch-box:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            cursor: pointer;
+        }
+        .arch-box.active {
+            ring-width: 2px;
+            ring-color: #2563eb;
+            background-color: #eff6ff;
+        }
+    </style>
+    <!-- Chosen Palette: Stone (Warm Neutral) Background with Postgres Blue (#336791) and Amber Accents -->
+    <!-- Application Structure Plan:
+         1. Hero Section: High-level overview.
+         2. Tabbed Navigation: Architecture, Cloud Native, Debugging, Evolution.
+         3. Architecture Tab: Interactive Grid Layout simulating the process/memory model. Clicking components updates a side panel.
+         4. Cloud Native Tab: Card-based layout explaining replication, HA, and K8s integration.
+         5. Debugging Tab: Interactive 'Console' where users click diagnostic tasks and see SQL queries.
+         6. Evolution Tab: Timeline/Chart showing feature growth across v14-v17.
+    -->
+    <!-- Visualization & Content Choices:
+         - Architecture: CSS Grid diagram. Justification: Best for showing structure without heavy image assets/SVG.
+         - Memory Usage: Chart.js Doughnut. Justification: Shows relationship between Shared Buffers and OS Cache.
+         - Release Performance: Chart.js Line. Justification: visualizes TPS improvements over versions.
+    -->
+    <!-- CONFIRMATION: NO SVG graphics used. NO Mermaid JS used. -->
+</head>
+<body class="bg-stone-50 text-stone-800 font-sans leading-relaxed selection:bg-blue-100 selection:text-blue-900">
+
+    <!-- Navigation -->
+    <nav class="bg-white border-b border-stone-200 sticky top-0 z-50 shadow-sm">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between h-16">
+                <div class="flex items-center">
+                    <div class="flex-shrink-0 flex items-center gap-2">
+                        <div class="w-8 h-8 bg-[#336791] rounded-md flex items-center justify-center text-white font-bold text-xl">P</div>
+                        <span class="font-bold text-xl tracking-tight text-stone-700">Postgres Explorer</span>
+                    </div>
+                    <div class="hidden sm:ml-8 sm:flex sm:space-x-8" id="nav-container">
+                        <!-- Nav items injected via JS -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content Area -->
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 min-h-screen">
+
+        <!-- Hero Section (Dynamic) -->
+        <div id="hero-section" class="mb-12 text-center max-w-3xl mx-auto">
+            <h1 class="text-4xl font-extrabold text-stone-900 tracking-tight sm:text-5xl mb-4">
+                The World's Most Advanced Open Source Relational Database
+            </h1>
+            <p class="text-xl text-stone-500">
+                Explore the internals of PostgreSQL, from its process-based architecture to its modern cloud-native capabilities and powerful debugging tools.
+            </p>
+        </div>
+
+        <!-- Content Container -->
+        <div id="app-content" class="transition-opacity duration-300">
+            <!-- Views injected here -->
+        </div>
+
+    </main>
+
+    <footer class="bg-stone-100 border-t border-stone-200 mt-12">
+        <div class="max-w-7xl mx-auto py-12 px-4 sm:px-6 lg:px-8">
+            <p class="text-center text-base text-stone-400">
+                Generated Interactive Guide &copy; 2024. Focused on Postgres 14-17 Architecture & Features.
+            </p>
+        </div>
+    </footer>
+
+    <script>
+        // --- DATA STORE ---
+        const appData = {
+            currentTab: 'architecture',
+            architecture: {
+                intro: "PostgreSQL uses a process-based model rather than threads. This ensures stability but requires careful memory management. The architecture is divided into Memory (Shared & Local), Backend Processes, and Storage (Disk). Click on the blocks below to explore each component.",
+                components: {
+                    'shared-buffers': {
+                        title: 'Shared Buffers (Memory)',
+                        desc: 'The primary memory area for caching table and index data. Postgres checks here first before reading from disk. Tuning this is critical (usually 25-40% of RAM).',
+                        details: 'Contains 8kB pages of data. Uses a clock-sweep algorithm for buffer eviction.'
+                    },
+                    'wal-buffers': {
+                        title: 'WAL Buffers',
+                        desc: 'Temporarily holds transaction log data before it is written to the WAL files on disk. Ensures data integrity and durability (ACID).',
+                        details: 'Data moves from here to disk via the WAL Writer process.'
+                    },
+                    'postmaster': {
+                        title: 'Postmaster (Daemon)',
+                        desc: 'The supervisor process (PID 1 of Postgres). It listens for connections, forks new backend processes, and manages system recovery.',
+                        details: 'If this process dies, the entire database instance restarts.'
+                    },
+                    'backend': {
+                        title: 'Backend Process',
+                        desc: 'A dedicated process spawned for each client connection. It executes queries and handles local memory (Work Mem).',
+                        details: 'One process per connection. Connection pooling (e.g., PgBouncer) is needed for high scale.'
+                    },
+                    'bgwriter': {
+                        title: 'Background Writer',
+                        desc: 'Slowly trickles dirty pages from Shared Buffers to disk to reduce the load on the Checkpointer.',
+                        details: 'Helps prevent I/O spikes during checkpoints.'
+                    },
+                    'walwriter': {
+                        title: 'WAL Writer',
+                        desc: 'Flushes WAL buffers to the physical WAL files on disk at commit time or periodically.',
+                        details: 'Critical for "Durability" in ACID.'
+                    },
+                    'autovacuum': {
+                        title: 'Autovacuum Launcher',
+                        desc: 'Managing process that starts worker processes to clean up dead tuples (MVCC bloat) and update statistics.',
+                        details: 'Essential for preventing table bloat and keeping query plans accurate.'
+                    },
+                    'storage': {
+                        title: 'Data Files (Heap & Indexes)',
+                        desc: 'The physical storage on disk. Contains the "Heap" (table data), B-Tree Indexes, and the TOAST table for large fields.',
+                        details: 'Organized into 1GB files (segments) by default.'
+                    }
+                }
+            },
+            cloud: {
+                intro: "PostgreSQL has evolved to fit the Cloud Native paradigm. While fundamentally stateful, features like Logic Replication, Foreign Data Wrappers, and robust tooling make it thrive in Kubernetes and microservice environments.",
+                features: [
+                    {
+                        title: "Logical Replication",
+                        icon: "🔄",
+                        desc: "Replicate specific tables or subsets of data to different databases. Essential for breaking monoliths into microservices and zero-downtime upgrades.",
+                        tag: "Microservices"
+                    },
+                    {
+                        title: "Foreign Data Wrappers (FDW)",
+                        icon: "🌐",
+                        desc: "Access data in remote Postgres DBs or other stores (S3, Mongo) as if they were local tables. Enables the 'Data Mesh' pattern.",
+                        tag: "Federation"
+                    },
+                    {
+                        title: "Connection Pooling",
+                        icon: "🔌",
+                        desc: "Cloud apps open thousands of short-lived connections. Integrated usage with PgBouncer allows Postgres to handle thousands of concurrent users efficiently.",
+                        tag: "Scale"
+                    },
+                    {
+                        title: "JSONB & NoSQL",
+                        icon: "📄",
+                        desc: "Binary JSON storage with GIN indexing allows Postgres to replace document stores like MongoDB, simplifying the cloud stack.",
+                        tag: "Versatility"
+                    }
+                ]
+            },
+            debug: {
+                intro: "When things go wrong, Postgres provides a rich set of system views and extensions. This simulator shows common troubleshooting scenarios and the SQL queries used to solve them.",
+                scenarios: [
+                    {
+                        id: 'locks',
+                        label: 'Find Blocking Locks',
+                        color: 'bg-red-100 text-red-800',
+                        query: `SELECT blocked_locks.pid AS blocked_pid,
+       blocking_locks.pid AS blocking_pid,
+       blocked_activity.query AS blocked_query,
+       blocking_activity.query AS blocking_query
+FROM  pg_catalog.pg_locks blocked_locks
+JOIN pg_catalog.pg_locks blocking_locks
+    ON blocked_locks.locktype = blocking_locks.locktype
+JOIN pg_catalog.pg_stat_activity blocked_activity
+    ON blocked_activity.pid = blocked_locks.pid
+WHERE NOT blocked_locks.granted;`,
+                        explanation: "Identifies which transaction is holding a lock that is preventing other queries from running. Essential for resolving application hangs."
+                    },
+                    {
+                        id: 'slow',
+                        label: 'Top Slow Queries',
+                        color: 'bg-amber-100 text-amber-800',
+                        query: `SELECT query, calls,
+       total_exec_time / calls as avg_time_ms,
+       rows / calls as avg_rows
+FROM pg_stat_statements
+ORDER BY total_exec_time DESC
+LIMIT 5;`,
+                        explanation: "Uses the `pg_stat_statements` extension (must be enabled) to find the queries consuming the most time historically. The first place to look for optimization."
+                    },
+                    {
+                        id: 'bloat',
+                        label: 'Check Table Bloat',
+                        color: 'bg-blue-100 text-blue-800',
+                        query: `SELECT relname, n_dead_tup,
+       n_live_tup, autovacuum_count
+FROM pg_stat_user_tables
+ORDER BY n_dead_tup DESC;`,
+                        explanation: "Checks how many 'dead rows' exist. High dead tuple counts suggest Autovacuum isn't keeping up, leading to wasted disk space and slow scans."
+                    },
+                    {
+                        id: 'connections',
+                        label: 'Active Connections',
+                        color: 'bg-green-100 text-green-800',
+                        query: `SELECT state, count(*)
+FROM pg_stat_activity
+GROUP BY state;`,
+                        explanation: "Shows how many connections are 'active' (running queries) vs 'idle'. Too many 'idle in transaction' states can hold locks and prevent vacuuming."
+                    }
+                ]
+            },
+            versions: {
+                intro: "Recent releases (v14-v17) have focused heavily on performance, logical replication enhancements, and developer experience.",
+                timeline: [
+                    { ver: 'v14', year: '2021', title: 'Concurrency & JSON', desc: 'Major improvements in connection scaling (snapshot scalability) and subscripting support for JSONB.' },
+                    { ver: 'v15', year: '2022', title: 'MERGE & Compression', desc: 'Introduced the standard SQL MERGE command. Added Zstd compression for WAL files.' },
+                    { ver: 'v16', year: '2023', title: 'Logical Rep from Standby', desc: 'Allow standby nodes to perform logical decoding, reducing load on the primary. SIMD support for text search.' },
+                    { ver: 'v17', year: '2024', title: 'Incremental Backup', desc: 'Native support for incremental backups via pg_basebackup, reducing backup size and time dramatically.' }
+                ]
+            }
+        };
+
+        const state = {
+            activeTab: 'architecture',
+            activeArchComponent: 'shared-buffers',
+            activeDebugId: null
+        };
+
+        // --- DOM ELEMENTS ---
+        const navContainer = document.getElementById('nav-container');
+        const appContent = document.getElementById('app-content');
+
+        // --- INITIALIZATION ---
+        function init() {
+            renderNav();
+            renderView();
+        }
+
+        // --- NAVIGATION ---
+        function renderNav() {
+            const tabs = [
+                { id: 'architecture', label: 'Architecture' },
+                { id: 'cloud', label: 'Cloud Native' },
+                { id: 'debug', label: 'Debugging Toolset' },
+                { id: 'versions', label: 'New Features (v14-v17)' }
+            ];
+
+            navContainer.innerHTML = tabs.map(tab => `
+                <button
+                    onclick="switchTab('${tab.id}')"
+                    class="${state.activeTab === tab.id
+                        ? 'border-[#336791] text-stone-900'
+                        : 'border-transparent text-stone-500 hover:border-stone-300 hover:text-stone-700'}
+                        inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium transition-colors"
+                >
+                    ${tab.label}
+                </button>
+            `).join('');
+
+            // Mobile nav could be added here, simplified for this layout
+        }
+
+        function switchTab(tabId) {
+            state.activeTab = tabId;
+            appContent.style.opacity = '0';
+            setTimeout(() => {
+                renderNav();
+                renderView();
+                appContent.style.opacity = '1';
+            }, 200);
+        }
+
+        // --- VIEW RENDERERS ---
+
+        function renderView() {
+            switch(state.activeTab) {
+                case 'architecture': renderArchitecture(); break;
+                case 'cloud': renderCloud(); break;
+                case 'debug': renderDebug(); break;
+                case 'versions': renderVersions(); break;
+            }
+        }
+
+        function renderArchitecture() {
+            const info = appData.architecture;
+            const currentComp = info.components[state.activeArchComponent];
+
+            appContent.innerHTML = `
+                <div class="space-y-8 animate-fade-in">
+                    <div class="bg-white rounded-lg shadow-sm p-6 border-l-4 border-[#336791]">
+                        <h2 class="text-2xl font-bold text-stone-900 mb-2">Process & Memory Architecture</h2>
+                        <p class="text-stone-600">${info.intro}</p>
+                    </div>
+
+                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                        <!-- Interactive Diagram -->
+                        <div class="lg:col-span-2 bg-stone-100 p-6 rounded-xl border border-stone-200">
+                            <h3 class="text-sm font-bold text-stone-500 uppercase tracking-wider mb-4 text-center">Server Instance</h3>
+
+                            <!-- Shared Memory Area -->
+                            <div class="border-2 border-dashed border-stone-300 rounded-lg p-4 mb-6 bg-white bg-opacity-50">
+                                <p class="text-xs text-center text-stone-400 font-mono mb-2">SHARED MEMORY</p>
+                                <div class="grid grid-cols-2 gap-4">
+                                    <div onclick="selectArch('shared-buffers')" class="arch-box ${state.activeArchComponent === 'shared-buffers' ? 'active' : 'bg-blue-50 border-blue-200'} border p-4 rounded text-center">
+                                        <div class="font-bold text-blue-900">Shared Buffers</div>
+                                        <div class="text-xs text-blue-700">Page Cache</div>
+                                    </div>
+                                    <div onclick="selectArch('wal-buffers')" class="arch-box ${state.activeArchComponent === 'wal-buffers' ? 'active' : 'bg-amber-50 border-amber-200'} border p-4 rounded text-center">
+                                        <div class="font-bold text-amber-900">WAL Buffers</div>
+                                        <div class="text-xs text-amber-700">Tx Logs</div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Processes Area -->
+                            <div class="grid grid-cols-3 gap-4 mb-6">
+                                <div class="col-span-3 flex justify-center">
+                                    <div onclick="selectArch('postmaster')" class="arch-box ${state.activeArchComponent === 'postmaster' ? 'active' : 'bg-stone-800 text-white'} p-3 rounded-lg shadow-lg w-full max-w-xs text-center">
+                                        <div class="font-bold">Postmaster (PID 1)</div>
+                                        <div class="text-xs opacity-75">Listener & Supervisor</div>
+                                    </div>
+                                </div>
+
+                                <div class="col-span-3 grid grid-cols-3 gap-4">
+                                    <div onclick="selectArch('bgwriter')" class="arch-box ${state.activeArchComponent === 'bgwriter' ? 'active' : 'bg-white border-stone-200'} border p-3 rounded text-center">
+                                        <div class="font-bold text-sm">BG Writer</div>
+                                    </div>
+                                    <div onclick="selectArch('walwriter')" class="arch-box ${state.activeArchComponent === 'walwriter' ? 'active' : 'bg-white border-stone-200'} border p-3 rounded text-center">
+                                        <div class="font-bold text-sm">WAL Writer</div>
+                                    </div>
+                                    <div onclick="selectArch('autovacuum')" class="arch-box ${state.activeArchComponent === 'autovacuum' ? 'active' : 'bg-white border-stone-200'} border p-3 rounded text-center">
+                                        <div class="font-bold text-sm">Autovacuum</div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Per Connection Area -->
+                            <div class="flex justify-center mb-6">
+                                <div class="border-l-2 border-stone-300 h-8"></div>
+                            </div>
+                            <div onclick="selectArch('backend')" class="arch-box ${state.activeArchComponent === 'backend' ? 'active' : 'bg-green-50 border-green-200'} border p-4 rounded-lg mx-auto max-w-md text-center">
+                                <div class="font-bold text-green-900">Backend Process (Client)</div>
+                                <div class="text-xs text-green-700">Work Mem, Temp Buffers</div>
+                            </div>
+
+                            <!-- Disk/Storage -->
+                            <div class="mt-8 pt-4 border-t border-stone-300">
+                                <div onclick="selectArch('storage')" class="arch-box ${state.activeArchComponent === 'storage' ? 'active' : 'bg-stone-200 border-stone-300'} border-b-4 border-r-4 p-4 rounded text-center">
+                                    <span class="text-2xl mr-2">💾</span>
+                                    <span class="font-bold text-stone-700">Disk Storage (Heap, B-Tree, WAL Files)</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Info Panel -->
+                        <div class="lg:col-span-1">
+                            <div class="bg-white border border-stone-200 rounded-xl shadow-lg p-6 sticky top-24">
+                                <h3 class="text-xl font-bold text-[#336791] mb-2">${currentComp.title}</h3>
+                                <div class="h-1 w-12 bg-amber-400 mb-4"></div>
+                                <p class="text-stone-700 mb-4 leading-relaxed">${currentComp.desc}</p>
+                                <div class="bg-stone-50 p-4 rounded border border-stone-100">
+                                    <h4 class="text-xs font-bold text-stone-500 uppercase mb-1">Technical Detail</h4>
+                                    <p class="text-sm text-stone-600 font-mono">${currentComp.details}</p>
+                                </div>
+                                <div class="mt-6 pt-6 border-t border-stone-100">
+                                    <div class="chart-container" style="height: 150px;">
+                                        <canvas id="memoryChart"></canvas>
+                                    </div>
+                                    <p class="text-center text-xs text-stone-400 mt-2">Typical Memory Allocation</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            // Draw micro chart for memory context
+            setTimeout(() => {
+                const ctx = document.getElementById('memoryChart').getContext('2d');
+                new Chart(ctx, {
+                    type: 'doughnut',
+                    data: {
+                        labels: ['Shared Buffers', 'OS Cache / Free', 'Work Mem (Per Conn)'],
+                        datasets: [{
+                            data: [25, 60, 15],
+                            backgroundColor: ['#336791', '#d6d3d1', '#10b981'],
+                            borderWidth: 0
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        cutout: '70%',
+                        plugins: { legend: { display: false } }
+                    }
+                });
+            }, 50);
+        }
+
+        function selectArch(compKey) {
+            state.activeArchComponent = compKey;
+            renderArchitecture();
+        }
+
+        function renderCloud() {
+            const info = appData.cloud;
+            appContent.innerHTML = `
+                <div class="space-y-8 animate-fade-in">
+                    <div class="bg-white rounded-lg shadow-sm p-6 border-l-4 border-emerald-500">
+                        <h2 class="text-2xl font-bold text-stone-900 mb-2">Cloud Native Adaptation</h2>
+                        <p class="text-stone-600">${info.intro}</p>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        ${info.features.map(feat => `
+                            <div class="bg-white p-6 rounded-xl shadow-sm border border-stone-100 hover:shadow-md transition-shadow">
+                                <div class="flex justify-between items-start mb-4">
+                                    <div class="text-3xl">${feat.icon}</div>
+                                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800">
+                                        ${feat.tag}
+                                    </span>
+                                </div>
+                                <h3 class="text-lg font-bold text-stone-800 mb-2">${feat.title}</h3>
+                                <p class="text-stone-600 text-sm leading-relaxed">${feat.desc}</p>
+                            </div>
+                        `).join('')}
+                    </div>
+
+                    <div class="bg-stone-800 text-stone-300 rounded-xl p-8 mt-8">
+                        <h3 class="text-white text-lg font-bold mb-4">The "Patroni" Standard</h3>
+                        <p class="mb-4">
+                            In Kubernetes, PostgreSQL is almost always deployed using an Operator (like CNPG or PGO).
+                            These operators use tools like <strong>Patroni</strong> to manage high availability.
+                        </p>
+                        <div class="flex flex-col sm:flex-row gap-4 text-sm font-mono">
+                            <div class="flex-1 bg-stone-900 p-4 rounded border border-stone-700">
+                                <div class="text-emerald-400 mb-2">Node 1 (Primary)</div>
+                                <div class="text-stone-500">Read/Write</div>
+                                <div class="text-stone-500">Streaming WAL -></div>
+                            </div>
+                            <div class="flex-1 bg-stone-900 p-4 rounded border border-stone-700">
+                                <div class="text-blue-400 mb-2">Node 2 (Standby)</div>
+                                <div class="text-stone-500">Read Only</div>
+                                <div class="text-stone-500"><- Replaying WAL</div>
+                            </div>
+                            <div class="flex-1 bg-stone-900 p-4 rounded border border-stone-700">
+                                <div class="text-blue-400 mb-2">Node 3 (Standby)</div>
+                                <div class="text-stone-500">Read Only</div>
+                                <div class="text-stone-500">Sync/Async</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderDebug() {
+            const info = appData.debug;
+            const activeScenario = state.activeDebugId
+                ? info.scenarios.find(s => s.id === state.activeDebugId)
+                : null;
+
+            appContent.innerHTML = `
+                <div class="space-y-8 animate-fade-in">
+                    <div class="bg-white rounded-lg shadow-sm p-6 border-l-4 border-amber-500">
+                        <h2 class="text-2xl font-bold text-stone-900 mb-2">Debugging Toolkit</h2>
+                        <p class="text-stone-600">${info.intro}</p>
+                    </div>
+
+                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                        <!-- Control Panel -->
+                        <div class="lg:col-span-1 space-y-4">
+                            <h3 class="font-bold text-stone-700 uppercase text-sm tracking-wide">Diagnostic Actions</h3>
+                            ${info.scenarios.map(s => `
+                                <button onclick="selectDebug('${s.id}')"
+                                    class="w-full text-left px-4 py-3 rounded-lg border transition-all duration-200 flex items-center justify-between
+                                    ${state.activeDebugId === s.id
+                                        ? 'bg-stone-800 text-white border-stone-800 shadow-lg scale-[1.02]'
+                                        : 'bg-white border-stone-200 text-stone-600 hover:bg-stone-50'}">
+                                    <span class="font-medium">${s.label}</span>
+                                    <span class="text-lg opacity-50">⚡</span>
+                                </button>
+                            `).join('')}
+
+                            <div class="mt-8 p-4 bg-stone-100 rounded-lg text-sm text-stone-500">
+                                <p class="font-bold mb-2">Pro Tip:</p>
+                                <p>Always enable <code class="bg-stone-200 px-1 rounded">pg_stat_statements</code> in your config to track performance history. It is the single most useful extension.</p>
+                            </div>
+                        </div>
+
+                        <!-- Terminal/Console -->
+                        <div class="lg:col-span-2">
+                            <div class="bg-[#1e1e1e] rounded-xl shadow-2xl overflow-hidden min-h-[400px] flex flex-col">
+                                <div class="bg-[#2d2d2d] px-4 py-2 flex items-center gap-2 border-b border-[#333]">
+                                    <div class="w-3 h-3 rounded-full bg-red-500"></div>
+                                    <div class="w-3 h-3 rounded-full bg-yellow-500"></div>
+                                    <div class="w-3 h-3 rounded-full bg-green-500"></div>
+                                    <span class="ml-2 text-stone-400 text-xs font-mono">postgres@production:~</span>
+                                </div>
+                                <div class="p-6 font-mono text-sm flex-grow">
+                                    ${activeScenario ? `
+                                        <div class="text-stone-400 mb-2">-- ${activeScenario.label}</div>
+                                        <div class="text-emerald-400 mb-6 whitespace-pre-wrap">${activeScenario.query}</div>
+                                        <div class="border-t border-stone-700 pt-4 mt-4">
+                                            <div class="text-stone-300 font-bold mb-2">Analysis:</div>
+                                            <div class="text-stone-400 leading-relaxed">${activeScenario.explanation}</div>
+                                        </div>
+                                    ` : `
+                                        <div class="text-stone-500 flex flex-col items-center justify-center h-full space-y-4">
+                                            <span class="text-4xl opacity-20">⌨️</span>
+                                            <p>Select a diagnostic action from the left to view the SQL.</p>
+                                        </div>
+                                    `}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function selectDebug(id) {
+            state.activeDebugId = id;
+            renderDebug();
+        }
+
+        function renderVersions() {
+            const info = appData.versions;
+            appContent.innerHTML = `
+                <div class="space-y-8 animate-fade-in">
+                    <div class="bg-white rounded-lg shadow-sm p-6 border-l-4 border-indigo-500">
+                        <h2 class="text-2xl font-bold text-stone-900 mb-2">Feature Timeline (v14 - v17)</h2>
+                        <p class="text-stone-600">${info.intro}</p>
+                    </div>
+
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+
+                        <!-- Timeline -->
+                        <div class="space-y-8">
+                            ${info.timeline.map((item, idx) => `
+                                <div class="relative pl-8 border-l-2 ${idx === info.timeline.length -1 ? 'border-transparent' : 'border-stone-200'}">
+                                    <div class="absolute -left-[9px] top-0 w-4 h-4 rounded-full bg-[#336791] border-4 border-white shadow-sm"></div>
+                                    <div class="bg-white p-5 rounded-lg border border-stone-200 shadow-sm hover:shadow-md transition-shadow">
+                                        <div class="flex justify-between items-center mb-2">
+                                            <span class="text-2xl font-bold text-[#336791]">${item.ver}</span>
+                                            <span class="text-xs font-mono text-stone-400 bg-stone-100 px-2 py-1 rounded">${item.year}</span>
+                                        </div>
+                                        <h4 class="font-bold text-stone-800 mb-1">${item.title}</h4>
+                                        <p class="text-stone-600 text-sm">${item.desc}</p>
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+
+                        <!-- Performance Chart Container -->
+                        <div>
+                             <div class="bg-white rounded-xl shadow-sm border border-stone-200 p-6">
+                                <h3 class="text-lg font-bold text-stone-800 mb-6">Relative Transaction Throughput Improvement</h3>
+                                <div class="chart-container">
+                                    <canvas id="versionChart"></canvas>
+                                </div>
+                                <p class="text-xs text-center text-stone-400 mt-4 italic">
+                                    *Illustrative data based on standard pgbench read-write workloads across versions
+                                </p>
+                            </div>
+
+                             <div class="mt-6 bg-indigo-50 rounded-xl p-6 border border-indigo-100">
+                                <h4 class="font-bold text-indigo-900 mb-2">Key Trend: Logical Replication</h4>
+                                <p class="text-sm text-indigo-800 leading-relaxed">
+                                    The most significant trend from v14 to v17 is the enhancement of Logical Replication.
+                                    Features like row filtering, column lists, and decoding on standby nodes are effectively turning Postgres into a distributed data platform.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            setTimeout(() => {
+                const ctx = document.getElementById('versionChart').getContext('2d');
+                new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: ['v13 (Baseline)', 'v14', 'v15', 'v16', 'v17'],
+                        datasets: [{
+                            label: 'TPS Performance Index',
+                            data: [100, 115, 122, 130, 145], // Illustrative index
+                            borderColor: '#336791',
+                            backgroundColor: 'rgba(51, 103, 145, 0.1)',
+                            borderWidth: 3,
+                            fill: true,
+                            tension: 0.4,
+                            pointBackgroundColor: '#ffffff',
+                            pointBorderColor: '#336791',
+                            pointRadius: 6,
+                            pointHoverRadius: 8
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            y: {
+                                beginAtZero: false,
+                                min: 90,
+                                grid: { color: '#f5f5f4' }
+                            },
+                            x: {
+                                grid: { display: false }
+                            }
+                        },
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: {
+                                callbacks: {
+                                    label: (ctx) => `Performance Index: ${ctx.raw}`
+                                }
+                            }
+                        }
+                    }
+                });
+            }, 50);
+        }
+
+        // Initialize App
+        init();
+
+    </script>
+</body>
+</html>
