@@ -36,7 +36,6 @@ Here is the updated guide including the **Linux Troubleshooting Toolset**. This 
 
 If a connection between K8s and Postgres fails, use these commands to find which "layer" is broken.
 
-| Layer | Goal | Linux Command |
 | --- | --- | --- |
 | **L1/L2** | Check Physical Link | `ip link show` or `ethtool eth0` |
 | **L3** | Check IP & Gateway | `ip addr` and `ip route` |
@@ -91,4 +90,16 @@ If a connection between K8s and Postgres fails, use these commands to find which
 
 ---
 
-**Would you like me to add the specific Illumio CLI commands (like `illumio-ven-ctl`) to this guide so you can check the VEN status directly?**
+Final Troubleshooting Workflow
+
+Check Physical (L1): ethtool eth0 (Is the link up?)
+
+Check Network (L3): ping 10.x.x.x (Can I reach the gateway/destination?)
+
+Check Port (L4): nc -zv 10.x.x.x 5432 (Is the port open?)
+
+Check VEN (L4 Security): illumio-ven-ctl status (Is the policy blocking it?)
+
+Check App (L7): ss -plnt (Is Postgres actually listening on that port?)
+
+| Layer | Goal | Linux Command |
