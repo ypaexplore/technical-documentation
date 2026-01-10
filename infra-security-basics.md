@@ -103,3 +103,87 @@ Check VEN (L4 Security): illumio-ven-ctl status (Is the policy blocking it?)
 Check App (L7): ss -plnt (Is Postgres actually listening on that port?)
 
 | Layer | Goal | Linux Command |
+
+
+This final section provides a deep dive into the fundamental building blocks of infrastructure and networking, combined with the specific security measures (controls) used to protect them. This is formatted in `.md` for your documentation.
+
+---
+
+# Infrastructure & Network Security Fundamentals
+
+## 1. Core Infrastructure Definitions
+
+Before securing the network, we must define the physical and logical components that hold your applications (Postgres, RabbitMQ, K8s).
+
+* **Compute (Host):** The physical server or Virtual Machine (VM) where the OS (Linux/Windows) runs.
+* **Virtualization/Hypervisor:** Software (like VMware or KVM) that allows one physical server to be carved into multiple "Virtual Machines."
+* **Containerization (Kubernetes/Docker):** A way to wrap an application (like RabbitMQ) with only the specific files it needs to run, making it portable and lightweight.
+* **Storage:** The physical disks (SSD/HDD) or Network Attached Storage (NAS) where Postgres writes its data. Security here focuses on **Encryption at Rest**.
+
+---
+
+## 2. Network Basics & Hierarchy
+
+Networking is organized into "layers" to ensure data moves efficiently.
+
+### Layer 2: The Local Neighborhood (Data Link)
+
+* **MAC Address:** The permanent "Hardware ID" burned into every NIC.
+* **VLAN (Virtual LAN):** A method to separate one physical switch into multiple private networks.
+* **ARP (Address Resolution Protocol):** The "translator" that finds which MAC address belongs to which IP address.
+
+### Layer 3: The Global Map (Network)
+
+* **IP Address:** The logical address assigned to a server.
+* **Routing:** The process of moving packets from one Subnet to another.
+* **ICMP (Ping):** A protocol used to check if a destination is "alive."
+
+---
+
+## 3. Security Measures & Controls
+
+Security is applied at every stage of the infrastructure to create a "Grid" of protection.
+
+### A. Network Security Measures
+
+| Measure | Tool | Purpose |
+| --- | --- | --- |
+| **Segmentation** | VLANs / Subnets | Grouping similar assets together to limit broad access. |
+| **Micro-segmentation** | **Illumio VEN** | Isolating individual servers/pods to prevent lateral movement. |
+| **Access Control** | Firewall / ACLs | Defining "Who" can talk to "Whom" on which Port. |
+| **Encryption in Transit** | TLS / IPsec | Scrambling data as it moves across the wire so it cannot be "sniffed." |
+
+### B. Endpoint (Host) Security Measures
+
+| Measure | Tool | Purpose |
+| --- | --- | --- |
+| **Hardening** | OS Configuration | Disabling unused services and closing unneeded ports (e.g., closing SSH if not used). |
+| **Patch Management** | Update Services | Regularly updating Linux/Postgres to fix known Zero-Day vulnerabilities. |
+| **EDR / AV** | Crowdstrike / SentinelOne | Real-time monitoring of the server to detect if a hacker is running "weird" commands. |
+| **IAM** | RBAC / Active Directory | "Identity and Access Management"—ensuring users only have the rights they need. |
+
+### C. Application & Data Security Measures
+
+| Measure | Tool | Purpose |
+| --- | --- | --- |
+| **Input Validation** | WAF / App Code | Checking data sent to the app to prevent **SQL Injection**. |
+| **Secrets Management** | HashiCorp Vault / K8s Secrets | Storing DB passwords and API keys in an encrypted "vault" instead of plain text files. |
+| **Data Masking** | Database Config | Hiding sensitive data (like credit card numbers) from users who don't need to see them. |
+
+---
+
+## 4. The "Security Mindset" Summary
+
+When looking at your Postgres/RabbitMQ environment, always ask three questions:
+
+1. **Visibility:** Can I see who is talking to this database right now? (Use Illumio Map).
+2. **Least Privilege:** Is Port 5432 open ONLY to the specific K8s nodes that need it?
+3. **Immutability:** If a hacker changes a file on the server, will my **AV/EDR** alert me?
+
+---
+
+### Final Documentation Tip
+
+> "Infrastructure provides the **capability** for data to move. Networking provides the **pathway**. Security provides the **permission**."
+
+**Would you like me to help you create a specific "Audit Checklist" for your Postgres server to verify all these security measures are actually in place?**
