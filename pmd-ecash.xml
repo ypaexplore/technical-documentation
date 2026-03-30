@@ -1,0 +1,729 @@
+<?xml version="1.0"?>
+<ruleset name="E-Cash PMD Ruleset"
+         xmlns="http://pmd.sourceforge.net/ruleset/2.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://pmd.sourceforge.net/ruleset/2.0.0
+             https://pmd.sourceforge.io/ruleset_2_0_0.xsd">
+
+    <description>
+        PMD ruleset for the E-Cash payments team at Société Générale.
+        Enforces: Clean Architecture, DDD, SOLID, DTO naming, DAO/JPA patterns,
+        SGConnect OAuth2 security hygiene, OpenAPI documentation, and SG coding standards.
+    </description>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         1. NAMING CONVENTIONS
+         Enforce SG E-Cash naming standards across all layers
+    ═══════════════════════════════════════════════════════════════ -->
+
+    <rule name="DTOSuffixRequired"
+          language="java"
+          message="Data Transfer Objects must use the suffix 'DTO' (e.g. PaymentDTO, not PaymentData or PaymentResponse)"
+          class="net.sourceforge.pmd.lang.rule.XPathRule">
+        <description>
+            All classes in the dto package or implementing Serializable as transfer objects
+            must use the DTO suffix. SG E-Cash standard.
+        </description>
+        <priority>2</priority>
+        <properties>
+            <property name="xpath">
+                <value>
+                    //ClassDeclaration[
+                        (pmd:fileName() = //PackageDeclaration[contains(@Name,'dto')]/@Name
+                        or ancestor::PackageDeclaration[contains(@Name,'.dto')])
+                        and not(ends-with(@SimpleName,'DTO'))
+                        and not(ends-with(@SimpleName,'Test'))
+                    ]
+                </value>
+            </property>
+        </properties>
+    </rule>
+
+    <rule name="DAOSuffixRequired"
+          language="java"
+          message="Data Access Objects must use the suffix 'DAO' (e.g. PaymentDAO, not PaymentRepository used directly as a DAO)"
+          class="net.sourceforge.pmd.lang.rule.XPathRule">
+        <description>
+            Classes in the dao or persistence package must end with DAO.
+            JPA Repositories are wrapped by DAOs — do not expose repositories directly to the application layer.
+        </description>
+        <priority>2</priority>
+        <properties>
+            <property name="xpath">
+                <value>
+                    //ClassDeclaration[
+                        ancestor::PackageDeclaration[contains(@Name,'.dao')
+                            or contains(@Name,'.persistence')]
+                        and not(ends-with(@SimpleName,'DAO'))
+                        and not(ends-with(@SimpleName,'Test'))
+                        and not(ends-with(@SimpleName,'Config'))
+                    ]
+                </value>
+            </property>
+        </properties>
+    </rule>
+
+    <rule ref="category/java/codestyle.xml/ClassNamingConventions">
+        <description>Enforce PascalCase for all class names.</description>
+        <priority>2</priority>
+        <properties>
+            <property name="utilityClassPattern" value="[A-Z][a-zA-Z0-9]+(Utils?|Helper|Constants|Builder)"/>
+            <property name="abstractClassPattern" value="Abstract[A-Z][a-zA-Z0-9]+"/>
+        </properties>
+    </rule>
+
+    <rule ref="category/java/codestyle.xml/MethodNamingConventions">
+        <description>Enforce camelCase for all method names.</description>
+        <priority>2</priority>
+    </rule>
+
+    <rule ref="category/java/codestyle.xml/FieldNamingConventions">
+        <description>Enforce camelCase for fields, UPPER_SNAKE for static finals.</description>
+        <priority>2</priority>
+    </rule>
+
+    <rule ref="category/java/codestyle.xml/PackageCase">
+        <description>Package names must be lowercase.</description>
+        <priority>1</priority>
+    </rule>
+
+    <rule ref="category/java/codestyle.xml/LongVariable">
+        <description>Variable names should not exceed 40 characters.</description>
+        <priority>3</priority>
+        <properties>
+            <property name="minimum" value="40"/>
+        </properties>
+    </rule>
+
+    <rule ref="category/java/codestyle.xml/ShortVariable">
+        <description>Variable names should be at least 2 characters (except loop counters).</description>
+        <priority>3</priority>
+        <properties>
+            <property name="minimum" value="2"/>
+        </properties>
+    </rule>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         2. SOLID PRINCIPLES
+    ═══════════════════════════════════════════════════════════════ -->
+
+    <!-- S — Single Responsibility -->
+    <rule ref="category/java/design.xml/GodClass">
+        <description>
+            S in SOLID: A class doing too much is a God Class.
+            Breaks single responsibility. Split into domain, application, and infrastructure concerns.
+        </description>
+        <priority>1</priority>
+    </rule>
+
+    <rule ref="category/java/design.xml/ExcessiveClassLength">
+        <description>S in SOLID: Classes must not exceed 200 lines. Extract responsibilities.</description>
+        <priority>2</priority>
+        <properties>
+            <property name="minimum" value="200"/>
+        </properties>
+    </rule>
+
+    <rule ref="category/java/design.xml/ExcessiveMethodLength">
+        <description>S in SOLID: Methods must not exceed 30 lines. Extract private helpers or domain services.</description>
+        <priority>2</priority>
+        <properties>
+            <property name="minimum" value="30"/>
+        </properties>
+    </rule>
+
+    <rule ref="category/java/design.xml/ExcessiveParameterList">
+        <description>
+            S in SOLID: Methods with more than 4 parameters suggest the method is doing too much.
+            Use a command/request DTO instead.
+        </description>
+        <priority>2</priority>
+        <properties>
+            <property name="minimum" value="4"/>
+        </properties>
+    </rule>
+
+    <rule ref="category/java/design.xml/TooManyFields">
+        <description>S in SOLID: Classes with more than 10 fields likely have too many responsibilities.</description>
+        <priority>2</priority>
+        <properties>
+            <property name="maxfields" value="10"/>
+        </properties>
+    </rule>
+
+    <rule ref="category/java/design.xml/TooManyMethods">
+        <description>S in SOLID: Classes with more than 15 public methods violate single responsibility.</description>
+        <priority>2</priority>
+        <properties>
+            <property name="maxmethods" value="15"/>
+        </properties>
+    </rule>
+
+    <!-- O — Open/Closed -->
+    <rule ref="category/java/design.xml/CyclomaticComplexity">
+        <description>
+            O in SOLID: High cyclomatic complexity signals switch/if chains that should be replaced
+            with polymorphism (strategy pattern, open/closed principle).
+        </description>
+        <priority>2</priority>
+        <properties>
+            <property name="methodReportLevel" value="8"/>
+            <property name="classReportLevel" value="40"/>
+        </properties>
+    </rule>
+
+    <rule ref="category/java/design.xml/NPathComplexity">
+        <description>O in SOLID: High NPath complexity — replace conditionals with polymorphism.</description>
+        <priority>2</priority>
+        <properties>
+            <property name="reportLevel" value="200"/>
+        </properties>
+    </rule>
+
+    <!-- D — Dependency Inversion -->
+    <rule ref="category/java/design.xml/CouplingBetweenObjects">
+        <description>
+            D in SOLID: Too many concrete type dependencies. Depend on abstractions (interfaces).
+            Especially important at the infrastructure layer boundary.
+        </description>
+        <priority>2</priority>
+        <properties>
+            <property name="threshold" value="10"/>
+        </properties>
+    </rule>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         3. CLEAN ARCHITECTURE — LAYER BOUNDARIES
+    ═══════════════════════════════════════════════════════════════ -->
+
+    <rule name="NoDomainDependencyOnInfrastructure"
+          language="java"
+          message="Domain classes must not import from infrastructure or persistence packages. Domain layer must remain pure."
+          class="net.sourceforge.pmd.lang.rule.XPathRule">
+        <description>
+            Clean Architecture: The domain layer must have zero outward dependencies.
+            No JPA, no Spring Data, no message brokers in the domain package.
+        </description>
+        <priority>1</priority>
+        <properties>
+            <property name="xpath">
+                <value>
+                    //ImportDeclaration[
+                        ancestor::CompilationUnit[
+                            PackageDeclaration[contains(@Name,'.domain')]
+                        ]
+                        and (
+                            contains(@Name,'javax.persistence')
+                            or contains(@Name,'jakarta.persistence')
+                            or contains(@Name,'org.springframework.data')
+                            or contains(@Name,'org.springframework.amqp')
+                            or contains(@Name,'org.springframework.kafka')
+                            or contains(@Name,'.infrastructure.')
+                            or contains(@Name,'.persistence.')
+                            or contains(@Name,'.repository.')
+                        )
+                    ]
+                </value>
+            </property>
+        </properties>
+    </rule>
+
+    <rule name="NoJPAAnnotationsInDomain"
+          language="java"
+          message="JPA annotations (@Entity, @Table, @Column) must not appear in the domain layer. Use infrastructure adapters."
+          class="net.sourceforge.pmd.lang.rule.XPathRule">
+        <description>
+            Domain entities must not be JPA entities. Use separate persistence adapters
+            that map between domain models and JPA entities.
+        </description>
+        <priority>1</priority>
+        <properties>
+            <property name="xpath">
+                <value>
+                    //Annotation[
+                        ancestor::ClassDeclaration[
+                            ancestor::PackageDeclaration[contains(@Name,'.domain')]
+                        ]
+                        and (
+                            @SimpleName = 'Entity'
+                            or @SimpleName = 'Table'
+                            or @SimpleName = 'Column'
+                            or @SimpleName = 'ManyToOne'
+                            or @SimpleName = 'OneToMany'
+                            or @SimpleName = 'ManyToMany'
+                        )
+                    ]
+                </value>
+            </property>
+        </properties>
+    </rule>
+
+    <rule name="NoDirectRepositoryInApplicationLayer"
+          language="java"
+          message="Application services must not inject Spring Data Repositories directly. Use DAO interfaces defined in the domain/application layer."
+          class="net.sourceforge.pmd.lang.rule.XPathRule">
+        <description>
+            Spring Data Repositories are an infrastructure concern.
+            Application services must depend on DAO interfaces, not repository implementations.
+        </description>
+        <priority>1</priority>
+        <properties>
+            <property name="xpath">
+                <value>
+                    //FieldDeclaration[
+                        ancestor::ClassDeclaration[
+                            ancestor::PackageDeclaration[contains(@Name,'.application')]
+                        ]
+                        and ClassType[ends-with(@SimpleName,'Repository')]
+                    ]
+                </value>
+            </property>
+        </properties>
+    </rule>
+
+    <rule name="ControllersMustNotHaveBusinessLogic"
+          language="java"
+          message="Controllers must only delegate to application services. No business logic, no direct DB access."
+          class="net.sourceforge.pmd.lang.rule.XPathRule">
+        <description>
+            Presentation layer controllers must be thin. Any logic beyond request mapping,
+            validation delegation, and response mapping is a violation.
+        </description>
+        <priority>2</priority>
+        <properties>
+            <property name="xpath">
+                <value>
+                    //ClassDeclaration[
+                        (ends-with(@SimpleName,'Controller') or ends-with(@SimpleName,'Resource'))
+                        and .//FieldDeclaration[
+                            ClassType[
+                                ends-with(@SimpleName,'Repository')
+                                or ends-with(@SimpleName,'DAO')
+                                or contains(@SimpleName,'Jdbc')
+                            ]
+                        ]
+                    ]
+                </value>
+            </property>
+        </properties>
+    </rule>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         4. JPA / DAO / TRANSACTION STANDARDS
+    ═══════════════════════════════════════════════════════════════ -->
+
+    <rule name="TransactionalRequiredOnDAOMutations"
+          language="java"
+          message="DAO methods that modify data (save, update, delete) must be annotated with @Transactional."
+          class="net.sourceforge.pmd.lang.rule.XPathRule">
+        <description>
+            All write operations in DAO classes must be transactional to ensure data consistency.
+            In E-Cash payment flows, partial writes without transactions cause reconciliation issues.
+        </description>
+        <priority>1</priority>
+        <properties>
+            <property name="xpath">
+                <value>
+                    //MethodDeclaration[
+                        ancestor::ClassDeclaration[ends-with(@SimpleName,'DAO')]
+                        and (
+                            starts-with(@Name,'save')
+                            or starts-with(@Name,'update')
+                            or starts-with(@Name,'delete')
+                            or starts-with(@Name,'insert')
+                            or starts-with(@Name,'persist')
+                            or starts-with(@Name,'merge')
+                            or starts-with(@Name,'remove')
+                            or starts-with(@Name,'create')
+                        )
+                        and not(.//Annotation[@SimpleName='Transactional'])
+                    ]
+                </value>
+            </property>
+        </properties>
+    </rule>
+
+    <rule name="NoRawJPAInServiceLayer"
+          language="java"
+          message="Service classes must not use EntityManager directly. Encapsulate JPA access in the DAO layer."
+          class="net.sourceforge.pmd.lang.rule.XPathRule">
+        <description>
+            EntityManager usage must be confined to the DAO/persistence layer.
+            Application services work through DAO interfaces only.
+        </description>
+        <priority>1</priority>
+        <properties>
+            <property name="xpath">
+                <value>
+                    //FieldDeclaration[
+                        ancestor::ClassDeclaration[ends-with(@SimpleName,'Service')]
+                        and ClassType[@SimpleName='EntityManager']
+                    ]
+                </value>
+            </property>
+        </properties>
+    </rule>
+
+    <rule name="NoOpenTransactionInPresentation"
+          language="java"
+          message="@Transactional must not be used in controllers or presentation layer classes. Transactions belong in the DAO/application layer."
+          class="net.sourceforge.pmd.lang.rule.XPathRule">
+        <description>
+            Open sessions in view and transaction management in controllers is an anti-pattern.
+            All transaction boundaries must be in the application or DAO layer.
+        </description>
+        <priority>1</priority>
+        <properties>
+            <property name="xpath">
+                <value>
+                    //Annotation[
+                        @SimpleName='Transactional'
+                        and ancestor::ClassDeclaration[
+                            ends-with(@SimpleName,'Controller')
+                            or ends-with(@SimpleName,'Resource')
+                        ]
+                    ]
+                </value>
+            </property>
+        </properties>
+    </rule>
+
+    <rule ref="category/java/errorprone.xml/CloseResource">
+        <description>JPA resources must be properly closed to avoid connection leaks in payment flows.</description>
+        <priority>1</priority>
+    </rule>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         5. SGCONNECT OAUTH2 SECURITY HYGIENE
+    ═══════════════════════════════════════════════════════════════ -->
+
+    <rule name="NoHardcodedSecurityCredentials"
+          language="java"
+          message="Hardcoded client IDs, secrets, or tokens detected. SGConnect credentials must come from centralised configuration (Vault / Spring Cloud Config), never from source code."
+          class="net.sourceforge.pmd.lang.rule.XPathRule">
+        <description>
+            SGConnect OAuth2 client_id, client_secret, and tokens must never be hardcoded.
+            All credentials must be injected via @Value from a centralised config server or Vault.
+        </description>
+        <priority>1</priority>
+        <properties>
+            <property name="xpath">
+                <value>
+                    //VariableDeclarator[
+                        (
+                            contains(lower-case(@Name),'secret')
+                            or contains(lower-case(@Name),'clientid')
+                            or contains(lower-case(@Name),'client_id')
+                            or contains(lower-case(@Name),'token')
+                            or contains(lower-case(@Name),'password')
+                            or contains(lower-case(@Name),'apikey')
+                            or contains(lower-case(@Name),'api_key')
+                        )
+                        and StringLiteral[string-length(@Image) > 0]
+                    ]
+                </value>
+            </property>
+        </properties>
+    </rule>
+
+    <rule name="NoHardcodedSGConnectUrls"
+          language="java"
+          message="SGConnect authorization server URL must not be hardcoded. Use centralised configuration: sgconnect.auth-server-url in application.yml."
+          class="net.sourceforge.pmd.lang.rule.XPathRule">
+        <description>
+            The SGConnect OAuth2 authorization server URL changes between environments.
+            It must be externalised to configuration, never hardcoded in source.
+        </description>
+        <priority>1</priority>
+        <properties>
+            <property name="xpath">
+                <value>
+                    //StringLiteral[
+                        contains(@Image,'sgconnect')
+                        or contains(@Image,'oauth2/authorize')
+                        or contains(@Image,'oauth2/token')
+                        or contains(@Image,'.authentication.')
+                    ]
+                </value>
+            </property>
+        </properties>
+    </rule>
+
+    <rule name="SecurityConfigMustNotPermitAll"
+          language="java"
+          message="permitAll() detected in SecurityConfig. All E-Cash endpoints must be protected by SGConnect OAuth2 scopes. Review this deliberately."
+          class="net.sourceforge.pmd.lang.rule.XPathRule">
+        <description>
+            In E-Cash payment APIs, open endpoints are a security risk.
+            Any use of permitAll() must be explicitly justified in a comment.
+        </description>
+        <priority>2</priority>
+        <properties>
+            <property name="xpath">
+                <value>
+                    //MethodCall[
+                        @MethodName='permitAll'
+                        and ancestor::ClassDeclaration[
+                            ends-with(@SimpleName,'SecurityConfig')
+                            or ends-with(@SimpleName,'SecurityConfiguration')
+                        ]
+                    ]
+                </value>
+            </property>
+        </properties>
+    </rule>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         6. CONFIGURATION CENTRALISATION — NO DUPLICATION
+    ═══════════════════════════════════════════════════════════════ -->
+
+    <rule name="NoHardcodedPortNumbers"
+          language="java"
+          message="Hardcoded port numbers detected. All ports must be externalised to application.yml / Spring Cloud Config."
+          class="net.sourceforge.pmd.lang.rule.XPathRule">
+        <description>
+            Port numbers, hostnames, and connection strings must come from centralised configuration.
+            Hardcoding causes environment drift and duplicated config.
+        </description>
+        <priority>2</priority>
+        <properties>
+            <property name="xpath">
+                <value>
+                    //VariableDeclarator[
+                        (contains(lower-case(@Name),'port') or contains(lower-case(@Name),'host'))
+                        and NumericLiteral[
+                            @IntLiteral = true()
+                            and (@Image = '8080' or @Image = '8443' or @Image = '5432'
+                                or @Image = '3306' or @Image = '5672' or @Image = '9092')
+                        ]
+                    ]
+                </value>
+            </property>
+        </properties>
+    </rule>
+
+    <rule ref="category/java/errorprone.xml/AvoidDuplicateLiterals">
+        <description>
+            Duplicate string literals indicate missing constants.
+            Centralise repeated values as named constants or externalise to config.
+        </description>
+        <priority>3</priority>
+        <properties>
+            <property name="maxDuplicateLiterals" value="2"/>
+            <property name="minimumLength" value="4"/>
+            <property name="skipAnnotations" value="true"/>
+        </properties>
+    </rule>
+
+    <rule ref="category/java/design.xml/ImmutableField">
+        <description>
+            Fields that are never modified should be final.
+            Immutable configuration values are safer in concurrent payment processing.
+        </description>
+        <priority>3</priority>
+    </rule>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         7. OPENAPI / SWAGGER DOCUMENTATION
+    ═══════════════════════════════════════════════════════════════ -->
+
+    <rule name="ControllersMustHaveOpenAPIAnnotation"
+          language="java"
+          message="REST controllers must be annotated with @Tag (OpenAPI). All E-Cash APIs must be documented with Swagger OAS3."
+          class="net.sourceforge.pmd.lang.rule.XPathRule">
+        <description>
+            Every controller must have @Tag for grouping in the API portal.
+            Each endpoint method must have @Operation with summary and description.
+        </description>
+        <priority>2</priority>
+        <properties>
+            <property name="xpath">
+                <value>
+                    //ClassDeclaration[
+                        .//Annotation[@SimpleName='RestController' or @SimpleName='Controller']
+                        and not(.//Annotation[@SimpleName='Tag'])
+                    ]
+                </value>
+            </property>
+        </properties>
+    </rule>
+
+    <rule name="EndpointsMustHaveOperationAnnotation"
+          language="java"
+          message="REST endpoint methods must have @Operation(summary, description) for OpenAPI documentation."
+          class="net.sourceforge.pmd.lang.rule.XPathRule">
+        <description>
+            All public endpoint methods (GET, POST, PUT, DELETE, PATCH) must be documented
+            with @Operation so they appear correctly in the E-Cash API portal.
+        </description>
+        <priority>2</priority>
+        <properties>
+            <property name="xpath">
+                <value>
+                    //MethodDeclaration[
+                        (
+                            .//Annotation[@SimpleName='GetMapping']
+                            or .//Annotation[@SimpleName='PostMapping']
+                            or .//Annotation[@SimpleName='PutMapping']
+                            or .//Annotation[@SimpleName='DeleteMapping']
+                            or .//Annotation[@SimpleName='PatchMapping']
+                        )
+                        and not(.//Annotation[@SimpleName='Operation'])
+                    ]
+                </value>
+            </property>
+        </properties>
+    </rule>
+
+    <rule name="DTOsMustHaveSchemaAnnotation"
+          language="java"
+          message="DTO classes must use @Schema to document their fields for OpenAPI. Consumers need to understand the payment data model."
+          class="net.sourceforge.pmd.lang.rule.XPathRule">
+        <description>
+            All DTO classes used in request/response bodies must have @Schema annotations
+            on the class and on each field to produce meaningful OpenAPI documentation.
+        </description>
+        <priority>3</priority>
+        <properties>
+            <property name="xpath">
+                <value>
+                    //ClassDeclaration[
+                        ends-with(@SimpleName,'DTO')
+                        and not(.//Annotation[@SimpleName='Schema'])
+                    ]
+                </value>
+            </property>
+        </properties>
+    </rule>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         8. TEST QUALITY — NO MOCKITO-ONLY TESTS
+    ═══════════════════════════════════════════════════════════════ -->
+
+    <rule name="NoMockitoOnDomainClasses"
+          language="java"
+          message="Mockito.mock() must not be used on domain classes. Domain objects must be instantiated directly. Mock only external system boundaries."
+          class="net.sourceforge.pmd.lang.rule.XPathRule">
+        <description>
+            Mocking domain classes hides real behaviour. Only infrastructure boundaries
+            (external APIs, message brokers, third-party payment gateways) should be mocked.
+        </description>
+        <priority>2</priority>
+        <properties>
+            <property name="xpath">
+                <value>
+                    //MethodCall[
+                        @MethodName='mock'
+                        and ancestor::ClassDeclaration[ends-with(@SimpleName,'Test')]
+                        and ArgumentList/ClassType[
+                            not(ends-with(@SimpleName,'Client'))
+                            and not(ends-with(@SimpleName,'Gateway'))
+                            and not(ends-with(@SimpleName,'Adapter'))
+                            and not(ends-with(@SimpleName,'Repository'))
+                        ]
+                    ]
+                </value>
+            </property>
+        </properties>
+    </rule>
+
+    <rule ref="category/java/bestpractices.xml/JUnitTestsShouldIncludeAssert">
+        <description>
+            Test methods must contain at least one assertion. Tests with no assertions give
+            false confidence in payment flows.
+        </description>
+        <priority>1</priority>
+    </rule>
+
+    <rule ref="category/java/bestpractices.xml/JUnitTestContainsTooManyAsserts">
+        <description>
+            Tests with too many assertions are testing multiple behaviours. Split into focused tests.
+        </description>
+        <priority>3</priority>
+        <properties>
+            <property name="maximumAsserts" value="7"/>
+        </properties>
+    </rule>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         9. GENERAL CODE QUALITY
+    ═══════════════════════════════════════════════════════════════ -->
+
+    <rule ref="category/java/errorprone.xml/EmptyCatchBlock">
+        <description>
+            Empty catch blocks silently swallow payment errors.
+            Every exception must be logged and handled or rethrown.
+        </description>
+        <priority>1</priority>
+    </rule>
+
+    <rule ref="category/java/errorprone.xml/AvoidCatchingGenericException">
+        <description>
+            Catching Exception or Throwable is too broad. Catch specific payment exceptions.
+        </description>
+        <priority>2</priority>
+    </rule>
+
+    <rule ref="category/java/errorprone.xml/ReturnEmptyCollectionRatherThanNull">
+        <description>
+            Never return null for collections in payment APIs. Return empty collections.
+            Prevents NullPointerExceptions in payment processing chains.
+        </description>
+        <priority>2</priority>
+    </rule>
+
+    <rule ref="category/java/bestpractices.xml/UnusedImports">
+        <priority>3</priority>
+    </rule>
+
+    <rule ref="category/java/bestpractices.xml/UnusedPrivateField">
+        <priority>2</priority>
+    </rule>
+
+    <rule ref="category/java/bestpractices.xml/UnusedLocalVariable">
+        <priority>2</priority>
+    </rule>
+
+    <rule ref="category/java/design.xml/UseCollectionIsEmpty">
+        <description>Use isEmpty() instead of size() == 0 for collection checks.</description>
+        <priority>3</priority>
+    </rule>
+
+    <rule ref="category/java/performance.xml/StringInstantiation">
+        <description>Avoid unnecessary String instantiation in high-throughput payment loops.</description>
+        <priority>3</priority>
+    </rule>
+
+    <rule ref="category/java/performance.xml/UseStringBufferForStringAppends">
+        <description>
+            In payment processing loops, use StringBuilder instead of string concatenation.
+        </description>
+        <priority>3</priority>
+    </rule>
+
+    <rule ref="category/java/multithreading.xml/AvoidSynchronizedAtMethodLevel">
+        <description>
+            Prefer fine-grained synchronization blocks over method-level synchronization
+            in concurrent payment processing.
+        </description>
+        <priority>3</priority>
+    </rule>
+
+    <rule ref="category/java/documentation.xml/CommentRequired">
+        <description>
+            Public APIs, domain classes, and DAO interfaces must have Javadoc.
+        </description>
+        <priority>3</priority>
+        <properties>
+            <property name="methodWithOverrideCommentRequirement" value="Ignored"/>
+            <property name="accessorCommentRequirement" value="Ignored"/>
+            <property name="classCommentRequirement" value="Required"/>
+            <property name="fieldCommentRequirement" value="Ignored"/>
+            <property name="publicMethodCommentRequirement" value="Required"/>
+            <property name="protectedMethodCommentRequirement" value="Ignored"/>
+            <property name="enumCommentRequirement" value="Required"/>
+            <property name="serialVersionUIDCommentRequired" value="Ignored"/>
+        </properties>
+    </rule>
+
+</ruleset>
